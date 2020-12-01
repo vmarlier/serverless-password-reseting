@@ -1,0 +1,64 @@
+﻿#!/bin/bash
+### API invoke url for the golang website
+echo ${invoke_url} >> /url
+echo "export URL=${invoke_url}" >> /home/ubuntu/.bashrc
+
+# Update package manager and install necessary tools
+sudo apt-get -y update
+sudo apt-get -y upgrade
+sudo apt-get install awscli unzip -y
+
+# Get the compress files from the S3 bucket
+curl https://website-sourcebucket-rstpwd0212.s3-eu-west-1.amazonaws.com/website.zip --output /home/ubuntu/website.zip
+curl https://website-sourcebucket-rstpwd0212.s3-eu-west-1.amazonaws.com/golang.tar.gz --output /home/ubuntu/golang.tar.gz
+
+# Install golang
+sudo tar -xvf /home/ubuntu/golang.tar.gz -C /usr/local
+mkdir -p /home/ubuntu/go/{src,pkg,bin}
+
+# Setup go environment
+echo "export GO111MODULE=on" >> /home/ubuntu/.bashrc
+echo "export GOROOT=/usr/local/go" >> /home/ubuntu/.bashrc
+echo "export GOPATH=/home/ubuntu/go" >> /home/ubuntu/.bashrc
+echo "export PATH=/usr/local/go/bin:$PATH" >> /home/ubuntu/.bashrc
+
+# unzip the go code source and give permission to ubuntu user then build the website
+sudo unzip /home/ubuntu/website.zip -d /home/ubuntu/go/src/
+sudo chown -R ubuntu:ubuntu /home/ubuntu/go
+#sudo go build /home/ubuntu/go/src/website/cmd/main.go
+
+# create the systemd service for the website
+cat > /etc/systemd/system/reset-password-website.service<< EOF
+[Unit]
+Description=Reset Password Website
+ConditionPathExists=/home/ubuntu/go/src/website
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+
+Restart=on-failure
+RestartSec=10
+startLimitIntervalSec=60
+
+WorkingDirectory=/home/ubuntu/go/src/website/cmd
+ExecStart=/home/ubuntu/go/src/website/cmd/website
+
+# make sure log directory exists and owned by syslog
+PermissionsStartOnly=true
+ExecStartPre=/bin/mkdir -p /var/log/reset-password-website
+ExecStartPre=/bin/chown syslog:adm /var/log/reset-password-website
+ExecStartPre=/bin/chmod 755 /var/log/reset-password-website
+StandardOutput=syslog
+StandardError=syslog
+SyslogIdentifier=reset-password-website
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# start and enable the systemd service
+sudo systemctl enable reset-password-website.service
+sudo systemctl start reset-password-website.service
